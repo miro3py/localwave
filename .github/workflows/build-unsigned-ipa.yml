@@ -12,10 +12,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Show Xcode and schemes
+        run: |
+          set -euxo pipefail
+          xcodebuild -version
+          xcodebuild -list -project localwave.xcodeproj
 
       - name: Build unsigned .app from xcodeproj
         run: |
@@ -30,11 +36,14 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            clean build
+            clean build | tee xcodebuild.log
 
-      - name: Package unsigned IPA
+      - name: Verify built app
         run: |
           set -euxo pipefail
+
+          echo "Products:"
+          find build/Build/Products -maxdepth 3 -print || true
 
           APP_PATH="$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" -print -quit)"
 
@@ -43,10 +52,25 @@ jobs:
             exit 1
           fi
 
+          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
+
+      - name: Package unsigned IPA
+        run: |
+          set -euxo pipefail
+
           mkdir -p unsigned-ipa/Payload
           cp -R "$APP_PATH" unsigned-ipa/Payload/
           cd unsigned-ipa
           zip -qry ../localwave-unsigned.ipa Payload
+
+          test -f ../localwave-unsigned.ipa
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
 
       - name: Create draft release and upload IPA
         env:
